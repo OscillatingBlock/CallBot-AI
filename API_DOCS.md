@@ -1,218 +1,226 @@
-**UPDATED API DOCS – NOW WITH `POST /voice` ENDPOINT**
 
----
 
-# **CALLBOT STUDIO – API v1 (Full OpenAPI Docs)**  
-**Includes `POST /voice` – Twilio Webhook Entry**
+ECHOLINK – API v3 (Updated Docs – Registration Flow)  
 
----
+*AI Phone Agents Using User’s Own Twilio Number – No WebSockets  
+All interaction via TwiML + REST calls (text in/out)
 
-## BASE URL
+BASE URL
 
-```
-https://api.callbot.studio/v1
-```
+[https://api.echolink.studio/v1](https://api.echolink.studio/v1)
 
----
+AUTHENTICATION
 
-## AUTHENTICATION
+Endpoint Type
 
-All **user** endpoints require:
-```http
-Authorization: Bearer <jwt-token>
-```
+Auth Required
 
-> `POST /voice` is **called by Twilio** → **no auth needed**
+Notes
 
----
+Initial Connection (POST /connect-twilio)
 
-## ENDPOINTS
+No Auth
 
----
+Issues the JWT for the user.
 
-### `POST /connect-twilio`
+User Endpoints (/bots, /my-number, etc.)
 
-**Connect user’s Twilio number**
+Authorization: Bearer <JWT>
 
-```json
+Uses the token obtained from /connect-twilio.
+
+Twilio Webhooks (/voice, /voice-response)
+
+No Auth
+
+Called by Twilio.
+
+NEW USER FLOW (Combined Registration & Auth)
+
+Step
+
+Endpoint
+
+Action
+
+Result
+
+1 (Initial)
+
+POST /connect-twilio
+
+User registers identity (email, name) and connects Twilio credentials.
+
+Returns JWT (access_token)
+
+2 (API Access)
+
+GET /my-number
+
+User uses JWT to access protected resources.
+
+API returns data.
+
+ENDPOINTS
+
+POST /connect-twilio  
+
+Register User, Connect Twilio Account, and Issue JWT
+
+This is the initial endpoint used by every new developer to set up their EchoLink account and receive their long-lived JWT for subsequent API access.
+
+Request
+
 {
+  "first_name": "...",
+  "last_name": "...",
+  "email": "...",
   "account_sid": "AC...",
   "auth_token": "xxx",
   "phone_number_sid": "PN..."
 }
-```
 
-**Response**
-```json
-{ "message": "Connected", "phone_number": "+14155551234" }
-```
 
----
 
-### `GET /my-number`
 
-**Get connected number**
+Field
 
-```json
-{ "phone_number": "+14155551234", "bots_count": 3 }
-```
+Required
 
----
+Description
 
-### `POST /bots`
+first_name
 
-**Create AI bot (uses connected number)**
+Yes
 
-```json
-{ "goal": "Book table", "webhook": "https://..." }
-```
+User's first name for account creation.
 
----
+last_name
 
-### `GET /bots`, `GET /bots/{id}`, `PATCH /bots/{id}`, `DELETE /bots/{id}`
+Yes
 
-*(as before)*
+User's last name for account creation.
 
----
+email
 
-## `POST /voice` – **TWILIO WEBHOOK (NEW!)**
+Yes
 
-> **This is where Twilio sends incoming calls**  
-> **No auth** — Twilio calls it directly
+User's email (unique identifier).
 
-### **Purpose**
-Tell Twilio:  
-> “Connect this call to our **Python ML service** via WebSocket”
+account_sid
 
----
+Yes
 
-### **Request (from Twilio)**
+Twilio Account SID.
 
-```http
-POST /voice?bot_id=bot_abc123
+auth_token
+
+Yes
+
+Twilio Auth Token.
+
+phone_number_sid
+
+Yes
+
+SID of the Twilio number to use.
+
+Success Response (200)
+
+{ 
+  "message": "Connected", 
+  "phone_number": "+14155551234",
+  "access_token": "eyJhbGciOiJIUzI1NiI...",
+  "token_type": "Bearer",
+  "expires_in": 86400
+}
+
+
+
+
+GET /my-number  
+
+Protected Endpoint
+
+Request
+
+GET /my-number
+Authorization: Bearer <YOUR_JWT_HERE>
+
+
+
+
+Response (200)
+
+{ "phone_number": "+14155551234", "bots_count": 2 }
+
+
+
+
+POST /bots  
+
+Protected Endpoint
+
+Request
+
+POST /bots
+Authorization: Bearer <YOUR_JWT_HERE>
+Content-Type: application/json
+
+
+
+
+{
+  "goal": "Book table",
+  "webhook": "[https://api.eatery.com/book](https://api.eatery.com/book)",
+  "context": "Open 5-10PM. Tables: 2,4,6"
+}
+
+
+
+
+(Other protected bot endpoints like GET /bots, PATCH /bots/{id}, DELETE /bots/{id} follow the same authentication pattern.)
+
+POST /voice – INITIAL TWILIO WEBHOOK
+
+Called once per call when customer dials in. No Auth.
+
+Request
+
+POST /voice?bot_id=bot_abc123&CallSid=CA...
 Content-Type: application/x-www-form-urlencoded
-```
 
-| Query Param | Required | Description |
-|------------|----------|-----------|
-| `bot_id`   | Yes      | Bot to handle the call |
 
----
 
-### **Response (TwiML)**
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
+Success Response (200) – TwiML
+
 <Response>
-  <Connect>
-    <Stream url="wss://python-ml-service:8000/voice/stream/bot_abc123"/>
-  </Connect>
+  <Say voice="man">Hi, welcome to your AI assistant. How can I help you today?</Say>
+  <!-- ... rest of TwiML/Gather elements ... -->
 </Response>
-```
 
----
 
-### **Headers**
 
-| Header | Value |
-|-------|-------|
-| `Content-Type` | `application/xml` |
 
----
+POST /voice-response – SPEECH RESULT WEBHOOK
 
-### **Errors**
+Called every time user speaks. No Auth.
 
-| Status | TwiML Response |
-|-------|----------------|
-| 400 | `<Say>Invalid bot</Say>` |
-| 404 | `<Say>Bot not found</Say>` |
+Request (from Twilio)
 
----
+POST /voice-response?bot_id=bot_abc123&CallSid=CA...
+Content-Type: application/x-www-form-urlencoded
 
-## CALL FLOW (Visual)
+SpeechResult=I+want+to+book+a+table+for+4
+Confidence=0.95
 
-```mermaid
-sequenceDiagram
-    Customer->>Twilio: Call +14155551234
-    Twilio->>Go API: POST /voice?bot_id=abc123
-    Go API-->>Twilio: <Connect><Stream url="wss://python-ml/voice/stream/abc123"/>
-    Twilio->>Python ML: WebSocket connection
-    Python ML->>AI: STT → LLM → TTS
-    Python ML-->>Customer: AI speaks
-```
 
----
 
-## CONFIGURATION (Twilio Console)
 
-In **Twilio Console** → Your Number → **Voice Webhook**:
+Success Response (200) – TwiML
 
-```
-https://api.callbot.studio/v1/voice
-```
-
----
-
-## FULL OPENAPI (Swagger) SNIPPET
-
-```yaml
-/post/voice:
-  post:
-    summary: Twilio Voice Webhook
-    description: |
-      Called by Twilio when a user calls their number.
-      Returns TwiML to connect call to Python ML service.
-    parameters:
-      - name: bot_id
-        in: query
-        required: true
-        schema:
-          type: string
-    responses:
-      '200':
-        description: TwiML with WebSocket stream
-        content:
-          application/xml:
-            example: |
-              <?xml version="1.0" encoding="UTF-8"?>
-              <Response>
-                <Connect>
-                  <Stream url="wss://python-ml-service:8000/voice/stream/bot_abc123"/>
-                </Connect>
-              </Response>
-      '400':
-        description: Invalid bot
-        content:
-          application/xml:
-            example: <Response><Say>Invalid bot</Say></Response>
-```
-
----
-
-## TEST WITH CURL (Simulate Twilio)
-
-```bash
-curl -X POST "http://localhost:8080/voice?bot_id=abc123" \
-  -H "Content-Type: application/x-www-form-urlencoded"
-```
-
-**Returns**:
-```xml
-<Response><Connect><Stream url="wss://python-ml-service:8000/voice/stream/abc123"/></Connect></Response>
-```
-
----
-
-## REPLY: `SEND FULL UPDATED OPENAPI + SWAGGER`
-
-I’ll send:
-
-1. `openapi.yaml` – **Full spec with `/voice`**  
-2. `swagger/index.html` – **Live docs**  
-3. `curl_test_voice.sh`  
-4. **Twilio Console Screenshot Guide**  
-5. **Postman Collection**
-
-**API docs now 100% complete — including call handling**
-
-Type: **`SEND FULL UPDATED OPENAPI + SWAGGER`**
+<Response>
+  <Say voice="woman">Got it! For how many people?</Say>
+  <!-- ... rest of TwiML/Gather elements ... -->
+</Response>
